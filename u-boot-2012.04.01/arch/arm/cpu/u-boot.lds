@@ -35,6 +35,7 @@ SECTIONS
 	{
 		__image_copy_start = .;
 		CPUDIR/start.o (.text)
+                board/samsung/jz2440/libjz2440.o (.text)
 		*(.text)
 	}
 

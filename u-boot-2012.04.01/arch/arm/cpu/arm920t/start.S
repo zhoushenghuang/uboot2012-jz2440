@@ -169,9 +169,33 @@ copyex:
 
 	/* FCLK:HCLK:PCLK = 1:2:4 */
 	/* default FCLK is 120 MHz ! */
+/*
 	ldr	r0, =CLKDIVN
 	mov	r1, #3
 	str	r1, [r0]
+*/
+    /* 设置时钟 */
+	ldr r0, =0x4c000014
+	mov r1, #0x05;			  // FCLK:HCLK:PCLK=1:4:8
+	str r1, [r0]
+ 
+	/* 如果HDIVN非0，CPU的总线模式应该从“fast bus mode”变为“asynchronous bus mode” */
+	mrc	p15, 0, r1, c1, c0, 0		/* 读出控制寄存器 */ 
+	orr	r1, r1, #0xc0000000			/* 设置为“asynchronous bus mode” */
+	mcr	p15, 0, r1, c1, c0, 0		/* 写入控制寄存器 */
+ 
+#define S3C2440_MPLL_400MHZ     ((0x5c<<12)|(0x01<<4)|(0x01))
+ 
+	/* MPLLCON = S3C2440_MPLL_400MHZ，FCLK=PLL=400MHZ */
+	ldr r0, =0x4c000004
+	ldr r1, =S3C2440_MPLL_400MHZ
+	str r1, [r0]
+    
+        /* 启动ICACHE */
+	mrc p15, 0, r0, c1, c0, 0	@ read control reg
+	orr r0, r0, #(1<<12)
+	mcr	p15, 0, r0, c1, c0, 0   @ write it back
+
 #endif	/* CONFIG_S3C24X0 */
 
 	/*
@@ -181,7 +205,7 @@ copyex:
 #ifndef CONFIG_SKIP_LOWLEVEL_INIT
 	bl	cpu_init_crit
 #endif
-
+#if 0
 /* Set stackpointer in internal RAM to call board_init_f */
 call_board_init_f:
 	ldr	sp, =(CONFIG_SYS_INIT_SP_ADDR)
@@ -311,6 +335,30 @@ _rel_dyn_end_ofs:
 	.word __rel_dyn_end - _start
 _dynsym_start_ofs:
 	.word __dynsym_start - _start
+#endif
+	ldr	sp, =(CONFIG_SYS_INIT_SP_ADDR)
+	bic	sp, sp, #7 /* 8-byte alignment for ABI compliance */
+	bl nand_init_ll    /* 初始化NAND Flash */
+ 
+	mov r0, #0    
+	ldr r1,_TEXT_BASE    /* _TEXT_BASE存在前4k空间里,若直接使用CONFIG_SYS_TEXT_BASE编译
+                             器可能会将这个宏定义放在SDRAM上，此时SDRAM上还没有代码 */
+	ldr r2, _bss_start_ofs
+	
+        /* 重定位，参数1为重定位前代码存放的起始地址=0，参数2为重定位地址，参数3为代码重定位的结束地址 */
+	bl copy_code_to_sdram    
+	bl clear_bss    /* 清bss段 */
+	ldr pc,=call_board_init_f    /* 跳到SDRAM中执行call_board_init_f */
+ 
+call_board_init_f:
+	ldr	r0,=0x00000000
+	bl	board_init_f    /* 调用board_init_f */
+ 
+.globl	call_board_init_r       /* 定义为全局标号，在board_init_f函数中调用 */
+call_board_init_r:              /* 从board_init_f中调用，得到参数r0=gd_t结构体指针，r1=重定位地址，r2=新的栈地址 */
+	mov sp, r2		/* 重新设置栈 */
+	bl board_init_r		/* 调用board_init_r,参数为r0,r1 */
+
 
 /*
  *************************************************************************
